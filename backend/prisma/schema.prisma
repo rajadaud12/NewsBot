@@ -1,0 +1,345 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SourceType {
+  GDELT
+  GOOGLE_NEWS
+  REDDIT
+  TIKTOK_CREATIVE_CENTER
+  TIKTOK_RESEARCH
+  X
+  RSS
+}
+
+enum EventStatus {
+  COLLECTED
+  NORMALIZED
+  DUPLICATE
+  FAILED
+}
+
+enum TrendLifecycle {
+  NEW
+  MONITORING
+  RISING
+  HOT
+  BREAKOUT
+  DECLINING
+  EXPIRED
+}
+
+enum Category {
+  VIRAL_ANIMALS
+  ODD_NEWS
+  LOCAL_NEWS
+  VIRAL_PEOPLE
+  CRYPTO_PEOPLE
+  TOKENIZED_COMPANIES
+  POLITICS
+  MEMES
+  MEME_PHRASES
+  TIKTOK_SOUNDS
+  BRAND_STUNTS
+  MASCOTS
+  INTERNET_DRAMA
+  REDDIT_TRENDS
+  BREAKING_NEWS
+  GENERAL
+}
+
+enum PublicationType {
+  BREAKING
+  DIGEST
+  DAILY_ROUNDUP
+}
+
+enum PublicationStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+}
+
+enum AlertType {
+  BREAKOUT
+  SOURCE_FAILURE
+  SYSTEM
+}
+
+enum Severity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+model Source {
+  id              String     @id @default(cuid())
+  name            String     @unique
+  type            SourceType
+  enabled         Boolean    @default(true)
+  configuration   Json?
+  lastCollectedAt DateTime?
+  lastSuccessAt   DateTime?
+  lastErrorAt     DateTime?
+  lastError       String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  rawEvents       RawEvent[]
+}
+
+model Watchlist {
+  id          String          @id @default(cuid())
+  name        String          @unique
+  description String?
+  category    Category?
+  enabled     Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  items       WatchlistItem[]
+}
+
+model WatchlistItem {
+  id          String    @id @default(cuid())
+  watchlistId String
+  value       String
+  aliases     String[]
+  metadata    Json?
+  enabled     Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, value])
+}
+
+model RawEvent {
+  id          String           @id @default(cuid())
+  sourceId    String
+  externalId  String
+  payload     Json
+  status      EventStatus      @default(COLLECTED)
+  error       String?
+  collectedAt DateTime         @default(now())
+  firstSeenAt DateTime         @default(now())
+  lastSeenAt  DateTime         @default(now())
+  source      Source           @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  normalized  NormalizedEvent?
+
+  @@unique([sourceId, externalId])
+  @@index([collectedAt])
+}
+
+model NormalizedEvent {
+  id                 String            @id @default(cuid())
+  rawEventId         String            @unique
+  platform           String
+  externalId         String
+  title              String
+  normalizedTitle    String
+  content            String?
+  author             String?
+  url                String
+  canonicalUrl       String
+  mediaUrl           String?
+  mediaHash          String?
+  perceptualHash     String?
+  publishedAt        DateTime
+  firstSeenAt        DateTime          @default(now())
+  lastSeenAt         DateTime          @default(now())
+  language           String?
+  category           Category          @default(GENERAL)
+  entities           String[]
+  keywords           String[]
+  contentFingerprint String
+  duplicateOfId      String?
+  metadata           Json?
+  rawEvent           RawEvent          @relation(fields: [rawEventId], references: [id], onDelete: Cascade)
+  duplicateOf        NormalizedEvent?  @relation("EventDuplicates", fields: [duplicateOfId], references: [id])
+  duplicates         NormalizedEvent[] @relation("EventDuplicates")
+  metrics            EventMetric[]
+  trendEvents        TrendEvent[]
+
+  @@index([contentFingerprint])
+  @@index([canonicalUrl])
+  @@index([publishedAt])
+  @@index([mediaHash])
+  @@index([perceptualHash])
+}
+
+model EventMetric {
+  id             String          @id @default(cuid())
+  eventId        String
+  observedAt     DateTime        @default(now())
+  views          BigInt?
+  likes          BigInt?
+  comments       BigInt?
+  shares         BigInt?
+  reposts        BigInt?
+  quotes         BigInt?
+  redditScore    BigInt?
+  redditComments BigInt?
+  mentionCount   BigInt?
+  raw            Json?
+  event          NormalizedEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, observedAt])
+}
+
+model Trend {
+  id              String                @id @default(cuid())
+  canonicalTitle  String
+  category        Category              @default(GENERAL)
+  lifecycle       TrendLifecycle        @default(NEW)
+  firstSeenAt     DateTime              @default(now())
+  lastSeenAt      DateTime              @default(now())
+  peakScore       Float                 @default(0)
+  currentScore    Float                 @default(0)
+  lastPublishedAt DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  events          TrendEvent[]
+  mentions        TrendMention[]
+  scores          TrendScore[]
+  snapshots       TrendSnapshot[]
+  analyses        AIAnalysis[]
+  publications    TelegramPublication[]
+  alerts          Alert[]
+
+  @@index([lifecycle, currentScore])
+  @@index([lastSeenAt])
+}
+
+model TrendEvent {
+  id         String          @id @default(cuid())
+  trendId    String
+  eventId    String
+  similarity Float
+  addedAt    DateTime        @default(now())
+  trend      Trend           @relation(fields: [trendId], references: [id], onDelete: Cascade)
+  event      NormalizedEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([trendId, eventId])
+  @@index([eventId])
+}
+
+model TrendMention {
+  id         String   @id @default(cuid())
+  trendId    String
+  platform   String
+  sourceName String
+  count      Int      @default(1)
+  observedAt DateTime @default(now())
+  trend      Trend    @relation(fields: [trendId], references: [id], onDelete: Cascade)
+
+  @@index([trendId, observedAt])
+}
+
+model TrendScore {
+  id                  String   @id @default(cuid())
+  trendId             String
+  score               Float
+  velocity            Float
+  acceleration        Float
+  engagement          Float
+  crossPlatformSpread Float
+  novelty             Float
+  sourceStrength      Float
+  calculatedAt        DateTime @default(now())
+  trend               Trend    @relation(fields: [trendId], references: [id], onDelete: Cascade)
+
+  @@index([trendId, calculatedAt])
+}
+
+model TrendSnapshot {
+  id             String         @id @default(cuid())
+  trendId        String
+  score          Float
+  lifecycle      TrendLifecycle
+  mentionsPerMin Float
+  likesPerMin    Float
+  commentsPerMin Float
+  repostsPerMin  Float
+  growthRate     Float
+  acceleration   Float
+  engagementRate Float
+  platformCount  Int
+  metrics        Json?
+  observedAt     DateTime       @default(now())
+  trend          Trend          @relation(fields: [trendId], references: [id], onDelete: Cascade)
+
+  @@index([trendId, observedAt])
+}
+
+model AIAnalysis {
+  id           String   @id @default(cuid())
+  trendId      String
+  model        String
+  headline     String
+  summary      String
+  whyTrending  String
+  category     String
+  entities     String[]
+  confidence   Float
+  isNewsworthy Boolean
+  isMeme       Boolean
+  isDrama      Boolean
+  isPolitical  Boolean
+  isCrypto     Boolean
+  rawResponse  Json?
+  error        String?
+  createdAt    DateTime @default(now())
+  trend        Trend    @relation(fields: [trendId], references: [id], onDelete: Cascade)
+
+  @@index([trendId, createdAt])
+}
+
+model TelegramPublication {
+  id                     String            @id @default(cuid())
+  trendId                String?
+  type                   PublicationType
+  status                 PublicationStatus @default(PENDING)
+  telegramMessageId      String?
+  content                String
+  scoreAtPublication     Float?
+  lifecycleAtPublication TrendLifecycle?
+  error                  String?
+  attempts               Int               @default(0)
+  publishedAt            DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  trend                  Trend?            @relation(fields: [trendId], references: [id], onDelete: SetNull)
+
+  @@index([trendId, type, createdAt])
+}
+
+model Alert {
+  id        String    @id @default(cuid())
+  trendId   String?
+  type      AlertType
+  severity  Severity  @default(INFO)
+  title     String
+  message   String
+  resolved  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  trend     Trend?    @relation(fields: [trendId], references: [id], onDelete: SetNull)
+
+  @@index([resolved, severity, createdAt])
+}
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  level     Severity @default(INFO)
+  component String
+  message   String
+  context   Json?
+  createdAt DateTime @default(now())
+
+  @@index([component, createdAt])
+}

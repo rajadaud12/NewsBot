@@ -1,0 +1,68 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PublicationStatus, PublicationType, TrendLifecycle } from '@prisma/client';
+import { fetchWithRetry } from '../common/utils/http';
+import { PrismaService } from '../database/prisma.service';
+
+export const escapeHtml = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+@Injectable()
+export class TelegramService {
+  private readonly logger = new Logger(TelegramService.name);
+  constructor(private readonly config: ConfigService, private readonly prisma: PrismaService) {}
+  isConfigured(): boolean { return Boolean(this.config.get<string>('telegram.token') && this.config.get<string>('telegram.chatId')); }
+
+  async publish(input: { trendId?: string; type: PublicationType; content: string; score?: number; lifecycle?: TrendLifecycle }): Promise<void> {
+    const publication = await this.prisma.telegramPublication.create({ data: {
+      trendId: input.trendId, type: input.type, content: input.content, scoreAtPublication: input.score,
+      lifecycleAtPublication: input.lifecycle, status: PublicationStatus.PENDING,
+    } });
+    if (!this.isConfigured()) {
+      await this.prisma.telegramPublication.update({ where: { id: publication.id }, data: { status: PublicationStatus.FAILED, error: 'Telegram credentials are not configured' } });
+      throw new Error('Telegram credentials are not configured');
+    }
+    try {
+      const chunks = this.split(input.content);
+      let firstMessageId: string | undefined;
+      for (let index = 0; index < chunks.length; index += 1) {
+        const id = await this.sendMessage(chunks[index]);
+        firstMessageId ??= id;
+      }
+      await this.prisma.$transaction([
+        this.prisma.telegramPublication.update({ where: { id: publication.id }, data: { status: PublicationStatus.SENT, telegramMessageId: firstMessageId, attempts: { increment: 1 }, publishedAt: new Date() } }),
+        ...(input.trendId ? [this.prisma.trend.update({ where: { id: input.trendId }, data: { lastPublishedAt: new Date() } })] : []),
+      ]);
+      this.logger.log(`Published ${input.type}${input.trendId ? ` for ${input.trendId}` : ''}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.prisma.telegramPublication.update({ where: { id: publication.id }, data: { status: PublicationStatus.FAILED, attempts: { increment: 1 }, error: message } });
+      throw error;
+    }
+  }
+
+  async sendMessage(text: string): Promise<string> {
+    const token = this.config.get<string>('telegram.token')!;
+    const response = await fetchWithRetry(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', retries: 4, timeoutMs: 15_000, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: this.config.get<string>('telegram.chatId'), text, parse_mode: this.config.get<string>('telegram.parseMode', 'HTML'), disable_web_page_preview: true }),
+    });
+    const body = await response.json() as any;
+    if (!body.ok) throw new Error(`Telegram error: ${body.description ?? 'unknown failure'}`);
+    return String(body.result.message_id);
+  }
+
+  private split(content: string): string[] {
+    if (content.length <= 3900) return [content];
+    const chunks: string[] = [];
+    let current = '';
+    for (const paragraph of content.split('\n\n')) {
+      if (current && current.length + paragraph.length + 2 > 3900) { chunks.push(current); current = ''; }
+      if (paragraph.length > 3900) {
+        if (current) chunks.push(current);
+        for (let i = 0; i < paragraph.length; i += 3900) chunks.push(paragraph.slice(i, i + 3900));
+      } else current += `${current ? '\n\n' : ''}${paragraph}`;
+    }
+    if (current) chunks.push(current);
+    return chunks;
+  }
+}

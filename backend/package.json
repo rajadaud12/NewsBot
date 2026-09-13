@@ -1,0 +1,48 @@
+{
+  "name": "@newsbot/backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "worker": "tsx watch src/worker.ts",
+    "worker:start": "node dist/worker.js",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:integration": "jest --runInBand --testPathPattern=integration",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "^11.0.4",
+    "@nestjs/common": "^11.1.6",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.1.6",
+    "@nestjs/platform-fastify": "^11.1.6",
+    "@prisma/client": "6.12.0",
+    "bullmq": "^5.58.5",
+    "fast-xml-parser": "^5.2.5",
+    "ioredis": "^5.7.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "sharp": "^0.35.4",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@nestjs/cli": "^11.0.10",
+    "@nestjs/testing": "^11.1.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.3.1",
+    "eslint": "^9.35.0",
+    "jest": "^30.1.3",
+    "prisma": "6.12.0",
+    "ts-jest": "^29.4.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.42.0"
+  }
+}

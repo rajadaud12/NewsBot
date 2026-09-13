@@ -1,0 +1,28 @@
+{
+  "name": "viral-news-intelligence",
+  "private": true,
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "setup": "node scripts/setup.mjs",
+    "dev:all": "concurrently -k -n backend,worker,frontend \"npm run start:dev\" \"npm run worker\" \"npm run dev\"",
+    "dev": "npm run dev -w frontend",
+    "start:dev": "npm run start:dev -w backend",
+    "worker": "npm run worker -w backend",
+    "test": "npm run test -w backend",
+    "lint": "npm run lint -w backend && npm run lint -w frontend",
+    "prisma:generate": "node scripts/prisma.mjs generate",
+    "prisma:migrate": "node scripts/prisma.mjs migrate dev"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "@nestjs/platform-fastify": {
+      "fastify": "5.12.1"
+    }
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

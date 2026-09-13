@@ -1,0 +1,14 @@
+import { PageHeader } from '@/components/page-header';
+import { api, formatTime, humanize } from '@/lib/api';
+import { Source } from '@/types';
+
+export const dynamic = 'force-dynamic';
+export default async function SourcesPage() {
+  const sources = await api<Source[]>('/sources', []);
+  return <><PageHeader eyebrow="Integration health" title="Sources" /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{sources.map((source) => {
+    const state = source.lastError ? 'Error' : source.enabled ? 'Active' : 'Needs setup';
+    const stateClass = source.lastError ? 'bg-red-100 text-red-800' : source.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800';
+    const xOptimization = source.configuration?.xOptimization;
+    return <article key={source.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-semibold">{humanize(source.name)}</h2><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${stateClass}`}>{state}</span></div><p className="mt-1 text-xs text-slate-500">{humanize(source.type)}</p><dl className="mt-5 space-y-2 text-sm"><div className="flex justify-between gap-4"><dt className="text-slate-500">Stored events</dt><dd className="font-medium">{source.rawEventCount ?? 0}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">Last fetched</dt><dd>{source.lastResult?.fetched ?? '—'}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">Last normalized</dt><dd>{source.lastResult?.normalized ?? '—'}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">Last success</dt><dd>{formatTime(source.lastSuccessAt)}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">Last collection</dt><dd>{formatTime(source.lastCollectedAt)}</dd></div></dl>{xOptimization && <div className="mt-4 rounded-lg bg-sky-50 p-3 text-xs leading-5 text-sky-800"><div className="flex justify-between"><span>Daily post-read cap</span><strong>{xOptimization.dailyPostsRead}/{xOptimization.dailyPostBudget}</strong></div><div className="flex justify-between"><span>Maximum per cycle</span><strong>{xOptimization.queriesPerRun} × {xOptimization.maxResults}</strong></div>{xOptimization.lastSkippedReason && <p className="mt-2">{xOptimization.lastSkippedReason}</p>}</div>}{source.configurationIssue && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">{source.configurationIssue}</p>}{source.lastError && <p className="mt-4 break-words rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-700">{source.lastError}</p>}</article>;
+  })}</div>{!sources.length && <p className="rounded-xl border border-dashed bg-white p-10 text-center text-slate-500">Start the backend to initialize source health.</p>}</>;
+}
