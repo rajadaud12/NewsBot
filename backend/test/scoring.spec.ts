@@ -1,8 +1,8 @@
 import { TrendLifecycle } from '@prisma/client';
-import { calculateMentionMomentum, calculateRateMetrics, computeTrendScore, lifecycleFor } from '../src/scoring/scoring.engine';
+import { applyEvidenceConfidence, calculateMentionMomentum, calculateRateMetrics, computeTrendScore, lifecycleFor } from '../src/scoring/scoring.engine';
 
 const weights = { velocity: 0.25, acceleration: 0.20, engagement: 0.15, crossPlatform: 0.20, novelty: 0.10, sourceStrength: 0.10 };
-const thresholds = { monitoring: 30, rising: 50, hot: 70, breakout: 85 };
+const thresholds = { monitoring: 25, rising: 45, hot: 65, breakout: 80 };
 
 describe('velocity, acceleration and scoring', () => {
   it('calculates rates from immutable observations', () => {
@@ -20,6 +20,16 @@ describe('velocity, acceleration and scoring', () => {
   it('applies the configured weights', () => {
     expect(computeTrendScore({ velocity: 100, acceleration: 100, engagement: 100, crossPlatform: 100, novelty: 100, sourceStrength: 100 }, weights)).toBe(100);
     expect(computeTrendScore({ velocity: 0, acceleration: 0, engagement: 0, crossPlatform: 0, novelty: 0, sourceStrength: 0 }, weights)).toBe(0);
+  });
+  it('does not punish a trend for telemetry a source cannot provide', () => {
+    const components = { velocity: 80, acceleration: 80, engagement: 0, crossPlatform: 80, novelty: 80, sourceStrength: 80 };
+    expect(computeTrendScore(components, weights, { engagement: false })).toBe(80);
+    expect(computeTrendScore(components, weights)).toBe(68);
+  });
+  it('requires more than one evidence item for full score confidence', () => {
+    expect(applyEvidenceConfidence(80, 1)).toBe(60);
+    expect(applyEvidenceConfidence(80, 2)).toBe(70);
+    expect(applyEvidenceConfidence(80, 3)).toBe(80);
   });
   it('detects acceleration when mentions concentrate in the recent half-window', () => {
     const now = new Date('2026-01-01T01:00:00Z');

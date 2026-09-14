@@ -3,6 +3,27 @@ import sharp from 'sharp';
 import { fetchWithRetry } from './http';
 
 export interface MediaHashes { mediaHash?: string; perceptualHash?: string }
+export interface ValidatedImage { url: string; contentType: string; bytes: number; width: number; height: number }
+
+export async function validateRemoteImage(url?: string): Promise<ValidatedImage | undefined> {
+  if (!url || !/^https:\/\//i.test(url)) return undefined;
+  try {
+    const response = await fetchWithRetry(url, {
+      timeoutMs: 10_000,
+      retries: 1,
+      headers: { Accept: 'image/jpeg,image/png,image/webp,image/gif' },
+    });
+    const contentType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(contentType)) return undefined;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length || buffer.length > 10 * 1024 * 1024) return undefined;
+    const metadata = await sharp(buffer, { animated: false }).metadata();
+    if (!metadata.width || !metadata.height || metadata.width < 120 || metadata.height < 120) return undefined;
+    return { url, contentType, bytes: buffer.length, width: metadata.width, height: metadata.height };
+  } catch {
+    return undefined;
+  }
+}
 
 export async function hashRemoteImage(url?: string): Promise<MediaHashes> {
   if (!url) return {};

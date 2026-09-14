@@ -26,6 +26,7 @@
     "bullmq": "^5.58.5",
     "fast-xml-parser": "^5.2.5",
     "ioredis": "^5.7.0",
+    "playwright-core": "^1.63.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "sharp": "^0.35.4",

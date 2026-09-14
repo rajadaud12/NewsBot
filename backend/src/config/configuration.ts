@@ -25,7 +25,7 @@ export default () => ({
     gdeltMs: number(process.env.GDELT_INTERVAL_MS, 900_000),
     googleNewsMs: number(process.env.GOOGLE_NEWS_INTERVAL_MS, 900_000),
     redditMs: number(process.env.REDDIT_INTERVAL_MS, 180_000),
-    tiktokMs: number(process.env.TIKTOK_INTERVAL_MS, 1_800_000),
+    tiktokMs: number(process.env.TIKTOK_INTERVAL_MS, 900_000),
     xMs: number(process.env.X_INTERVAL_MS, 900_000),
     scoringMs: number(process.env.SCORING_INTERVAL_MS, 60_000),
     lifecycleMs: number(process.env.LIFECYCLE_INTERVAL_MS, 300_000),
@@ -61,10 +61,10 @@ export default () => ({
       sourceStrength: number(process.env.WEIGHT_SOURCE_STRENGTH, 0.10),
     },
     thresholds: {
-      monitoring: number(process.env.THRESHOLD_MONITORING, 30),
-      rising: number(process.env.THRESHOLD_RISING, 50),
-      hot: number(process.env.THRESHOLD_HOT, 70),
-      breakout: number(process.env.THRESHOLD_BREAKOUT, 85),
+      monitoring: number(process.env.THRESHOLD_MONITORING, 25),
+      rising: number(process.env.THRESHOLD_RISING, 40),
+      hot: number(process.env.THRESHOLD_HOT, 55),
+      breakout: number(process.env.THRESHOLD_BREAKOUT, 75),
     },
     metricLookbackMinutes: number(process.env.METRIC_LOOKBACK_MINUTES, 60),
     expiryHours: number(process.env.TREND_EXPIRY_HOURS, 48),
@@ -73,16 +73,22 @@ export default () => ({
     threshold: number(process.env.CLUSTER_SIMILARITY_THRESHOLD, 0.42),
     lookbackHours: number(process.env.TREND_LOOKBACK_HOURS, 72),
   },
+  publicationThreshold: number(process.env.PUBLICATION_THRESHOLD, 55),
   publicationScoreDelta: number(process.env.PUBLICATION_SCORE_DELTA, 5),
   ollama: {
     baseUrl: process.env.OLLAMA_BASE_URL ?? 'https://ollama.com',
     apiKey: process.env.OLLAMA_API_KEY ?? '',
     model: process.env.OLLAMA_MODEL ?? 'gemma4:31b',
     timeoutMs: number(process.env.OLLAMA_TIMEOUT_MS, 90_000),
+    minimumConfidence: Math.min(1, Math.max(0, number(process.env.OLLAMA_MIN_CONFIDENCE, 0.7))),
   },
   telegram: {
     token: process.env.TELEGRAM_BOT_TOKEN ?? '',
     chatId: process.env.TELEGRAM_CHAT_ID ?? '',
     parseMode: process.env.TELEGRAM_PARSE_MODE ?? 'HTML',
+    maxImages: Math.min(10, Math.max(0, Math.floor(number(process.env.TELEGRAM_MAX_IMAGES, 3)))),
+    deliveryMode: ['continuous', 'periodic', 'hybrid'].includes(process.env.TELEGRAM_DELIVERY_MODE ?? '')
+      ? process.env.TELEGRAM_DELIVERY_MODE
+      : 'hybrid',
   },
 });

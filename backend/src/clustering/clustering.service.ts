@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NormalizedEvent } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import { domainOf, jaccard, levenshteinSimilarity, tokenize } from '../common/utils/text';
+import { jaccard, levenshteinSimilarity, tokenize } from '../common/utils/text';
 
 export interface ClusterComparable {
   title: string;
@@ -12,12 +12,17 @@ export interface ClusterComparable {
 }
 
 export function clusterSimilarity(left: ClusterComparable, right: ClusterComparable): number {
-  const tokenScore = jaccard(tokenize(left.title), tokenize(right.title));
+  const leftTokens = tokenize(left.title);
+  const rightTokens = tokenize(right.title);
+  const tokenScore = jaccard(leftTokens, rightTokens);
   const keywordScore = jaccard(left.keywords, right.keywords);
   const entityScore = left.entities.length && right.entities.length ? jaccard(left.entities.map((x) => x.toLowerCase()), right.entities.map((x) => x.toLowerCase())) : 0;
   const fuzzyScore = levenshteinSimilarity(left.title, right.title);
-  const domainScore = domainOf(left.url) && domainOf(left.url) === domainOf(right.url) ? 1 : 0;
-  return tokenScore * 0.32 + keywordScore * 0.23 + entityScore * 0.20 + fuzzyScore * 0.20 + domainScore * 0.05;
+  const anchorScore = jaccard(leftTokens.filter((token) => token.length >= 6 || /\d/.test(token)), rightTokens.filter((token) => token.length >= 6 || /\d/.test(token)));
+  let score = tokenScore * 0.30 + keywordScore * 0.15 + entityScore * 0.30 + fuzzyScore * 0.15 + anchorScore * 0.10;
+  if (left.entities.length && right.entities.length && entityScore === 0 && tokenScore < 0.25) score *= 0.65;
+  if (tokenScore < 0.12 && entityScore === 0 && anchorScore === 0) score = Math.min(score, 0.25);
+  return score;
 }
 
 @Injectable()

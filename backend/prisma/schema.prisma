@@ -307,6 +307,7 @@ model TelegramPublication {
   status                 PublicationStatus @default(PENDING)
   telegramMessageId      String?
   content                String
+  mediaUrls              String[]          @default([])
   scoreAtPublication     Float?
   lifecycleAtPublication TrendLifecycle?
   error                  String?

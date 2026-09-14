@@ -5,11 +5,12 @@ import { CollectionResult } from '../common/types/source';
 import { PrismaService } from '../database/prisma.service';
 import { EventsService } from '../events/events.service';
 import { SourceRegistry } from './source.registry';
+import { PipelineLogService } from '../pipeline/pipeline-log.service';
 
 @Injectable()
 export class SourcesService {
   private readonly logger = new Logger(SourcesService.name);
-  constructor(private readonly registry: SourceRegistry, private readonly events: EventsService, private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(private readonly registry: SourceRegistry, private readonly events: EventsService, private readonly prisma: PrismaService, private readonly config: ConfigService, private readonly pipeline: PipelineLogService) {}
 
   async initialize(): Promise<void> {
     for (const provider of this.registry.providers) {
@@ -28,7 +29,11 @@ export class SourcesService {
       where: { name }, update: { enabled: provider.isEnabled(), lastCollectedAt: new Date() },
       create: { name, type: provider.type as SourceType, enabled: provider.isEnabled(), lastCollectedAt: new Date() },
     });
-    if (!provider.isEnabled()) return result;
+    if (!provider.isEnabled()) {
+      await this.pipeline.write({ stage: 'COLLECTION', status: 'SKIPPED', source: name, message: `${name} collection skipped because the source is disabled` });
+      return result;
+    }
+    await this.pipeline.write({ stage: 'COLLECTION', status: 'STARTED', source: name, message: `Started collecting news from ${name}` });
     try {
       const events = await provider.collect();
       result.fetched = events.length;
@@ -42,12 +47,14 @@ export class SourcesService {
       }
       await this.prisma.source.update({ where: { id: source.id }, data: { lastSuccessAt: new Date(), lastError: null } });
       await this.log(Severity.INFO, 'collector', `Collected ${name}`, result as unknown as Prisma.InputJsonValue);
+      await this.pipeline.write({ stage: 'COLLECTION', status: 'COMPLETED', source: name, message: `Completed ${name} collection`, context: { ...result } });
       this.logger.log(`${name}: ${JSON.stringify(result)}`);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.prisma.source.update({ where: { id: source.id }, data: { lastErrorAt: new Date(), lastError: message } });
       await this.log(Severity.ERROR, 'collector', `${name} collection failed`, { error: message });
+      await this.pipeline.write({ stage: 'COLLECTION', status: 'FAILED', source: name, message: `${name} collection failed`, context: { error: message } });
       await this.prisma.alert.create({ data: { type: 'SOURCE_FAILURE', severity: Severity.ERROR, title: `${name} collector failed`, message } });
       throw error;
     }
@@ -80,7 +87,8 @@ export class SourcesService {
     if (name === 'tiktok-research') return 'TikTok Research API is intentionally unavailable until approved access is configured.';
     if (!configured.includes(name)) return `Add ${name} to ENABLED_SOURCES to activate this collector.`;
     if (name === 'reddit' && !process.env.REDDIT_ACCESS_TOKEN && !(process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET)) return 'Add Reddit OAuth credentials.';
-    if (name === 'tiktok' && !process.env.TIKTOK_CREATIVE_CENTER_FEED_URL) return 'Add an approved TikTok Creative Center feed URL.';
+    if (name === 'tiktok' && process.env.TIKTOK_COLLECTION_MODE === 'feed' && !process.env.TIKTOK_CREATIVE_CENTER_FEED_URL) return 'Feed mode requires an approved TikTok Creative Center JSON feed URL.';
+    if (name === 'tiktok' && (process.env.TIKTOK_COLLECTION_MODE ?? 'browser') === 'browser' && !process.env.TIKTOK_BROWSER_EXECUTABLE_PATH && !process.env.TIKTOK_BROWSER_CHANNEL) return 'Browser mode requires Chrome; set TIKTOK_BROWSER_CHANNEL or TIKTOK_BROWSER_EXECUTABLE_PATH.';
     if (name === 'x' && !process.env.X_BEARER_TOKEN && !(process.env.X_API_KEY && process.env.X_API_SECRET)) return 'Add an X bearer token or API key and secret.';
     return undefined;
   }

@@ -5,13 +5,14 @@ import { ClusteringService } from '../clustering/clustering.service';
 import { MetricInput, RawEventInput, TrendSource } from '../common/types/source';
 import { canonicalizeUrl, fingerprint, inferCategory, normalizeText } from '../common/utils/text';
 import { hammingDistance, hashRemoteImage } from '../common/utils/media';
+import { PipelineLogService } from '../pipeline/pipeline-log.service';
 
 export type IngestStatus = 'normalized' | 'duplicate' | 'seen';
 
 @Injectable()
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
-  constructor(private readonly prisma: PrismaService, private readonly clustering: ClusteringService) {}
+  constructor(private readonly prisma: PrismaService, private readonly clustering: ClusteringService, private readonly pipeline: PipelineLogService) {}
 
   async ingest(provider: TrendSource, input: RawEventInput): Promise<{ status: IngestStatus; clustered: boolean }> {
     const source = await this.prisma.source.upsert({
@@ -21,10 +22,19 @@ export class EventsService {
     });
     const existingRaw = await this.prisma.rawEvent.findUnique({ where: { sourceId_externalId: { sourceId: source.id, externalId: input.externalId } }, include: { normalized: true } });
     if (existingRaw?.normalized) {
+      const observedAt = new Date();
       await this.prisma.rawEvent.update({ where: { id: existingRaw.id }, data: { lastSeenAt: new Date(), payload: input.payload as Prisma.InputJsonValue } });
-      await this.prisma.normalizedEvent.update({ where: { id: existingRaw.normalized.id }, data: { lastSeenAt: new Date() } });
+      await this.prisma.normalizedEvent.update({ where: { id: existingRaw.normalized.id }, data: { lastSeenAt: observedAt } });
       if (input.metrics) await this.recordMetric(existingRaw.normalized.id, input.metrics);
-      return { status: 'seen', clustered: false };
+      const membership = await this.prisma.trendEvent.findFirst({ where: { eventId: existingRaw.normalized.id }, select: { trendId: true } });
+      if (membership) {
+        await this.prisma.$transaction([
+          this.prisma.trendMention.create({ data: { trendId: membership.trendId, platform: existingRaw.normalized.platform, sourceName: provider.name, count: 1, observedAt } }),
+          this.prisma.trend.update({ where: { id: membership.trendId }, data: { lastSeenAt: observedAt } }),
+        ]);
+      }
+      await this.pipeline.write({ stage: 'NORMALIZATION', status: 'SKIPPED', source: provider.name, eventId: existingRaw.normalized.id, trendId: membership?.trendId, message: `Previously processed news seen again: ${existingRaw.normalized.title}`, context: { externalId: input.externalId, mentionRefreshed: Boolean(membership) } });
+      return { status: 'seen', clustered: Boolean(membership) };
     }
 
     const raw = existingRaw ?? await this.prisma.rawEvent.create({ data: {
@@ -32,6 +42,7 @@ export class EventsService {
       firstSeenAt: new Date(), lastSeenAt: new Date(), status: EventStatus.COLLECTED,
     } });
     try {
+      await this.pipeline.write({ stage: 'NORMALIZATION', status: 'STARTED', source: provider.name, message: `Processing collected news ${input.externalId}`, context: { externalId: input.externalId } });
       const normalized = await provider.normalize(input);
       const canonicalUrl = canonicalizeUrl(normalized.url);
       const contentFingerprint = fingerprint(normalized.title, normalized.content);
@@ -54,11 +65,18 @@ export class EventsService {
       await this.prisma.rawEvent.update({ where: { id: raw.id }, data: { status: duplicate ? EventStatus.DUPLICATE : EventStatus.NORMALIZED } });
       if (input.metrics) await this.recordMetric(event.id, input.metrics);
       const clustered = await this.clustering.assign(event, provider.name);
+      await this.pipeline.write({
+        stage: 'NORMALIZATION', status: duplicate ? 'SKIPPED' : 'COMPLETED', source: provider.name, eventId: event.id, trendId: clustered.trendId,
+        message: duplicate ? `Processed duplicate news: ${event.title}` : `Normalized news: ${event.title}`,
+        context: { externalId: input.externalId, category: event.category, duplicateOfId: duplicate?.id ?? null },
+      });
+      await this.pipeline.write({ stage: 'CLUSTERING', status: 'COMPLETED', source: provider.name, eventId: event.id, trendId: clustered.trendId, message: clustered.created ? `Created a new trend for: ${event.title}` : `Added news to an existing trend: ${event.title}`, context: { similarity: clustered.similarity } });
       return { status: duplicate ? 'duplicate' : 'normalized', clustered: Boolean(clustered.trendId) };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.prisma.rawEvent.update({ where: { id: raw.id }, data: { status: EventStatus.FAILED, error: message } });
       this.logger.error(`Failed to normalize ${provider.name}:${input.externalId}: ${message}`);
+      await this.pipeline.write({ stage: 'NORMALIZATION', status: 'FAILED', source: provider.name, message: `Could not process collected news ${input.externalId}`, context: { externalId: input.externalId, error: message } });
       throw error;
     }
   }

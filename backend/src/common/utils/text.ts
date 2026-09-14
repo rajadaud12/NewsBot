@@ -77,3 +77,15 @@ export const levenshteinSimilarity = (left: string, right: string): number => {
 export const domainOf = (value: string): string => {
   try { return new URL(value).hostname.replace(/^www\./, ''); } catch { return ''; }
 };
+
+export const publisherOf = (event: { canonicalUrl?: string; url?: string; author?: string | null; metadata?: unknown }): string => {
+  const metadata = event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata)
+    ? event.metadata as Record<string, unknown>
+    : {};
+  const configured = [metadata.publisherUrl, metadata.domain]
+    .find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+  if (configured) return domainOf(configured) || normalizeText(configured);
+  const linkDomain = domainOf(event.canonicalUrl ?? event.url ?? '');
+  if (linkDomain && linkDomain !== 'news.google.com') return linkDomain;
+  return normalizeText(event.author ?? '') || linkDomain;
+};

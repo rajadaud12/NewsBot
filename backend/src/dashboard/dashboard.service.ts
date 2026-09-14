@@ -11,7 +11,7 @@ export class DashboardService {
       this.prisma.trend.count({ where: { lifecycle: { not: TrendLifecycle.EXPIRED } } }),
       this.prisma.trend.count({ where: { lifecycle: TrendLifecycle.BREAKOUT } }),
       this.prisma.normalizedEvent.count({ where: { firstSeenAt: { gte: since } } }),
-      this.prisma.telegramPublication.count({ where: { status: PublicationStatus.SENT, publishedAt: { gte: since } } }),
+      this.prisma.telegramPublication.count({ where: { status: PublicationStatus.SENT, telegramMessageId: { not: null }, publishedAt: { gte: since } } }),
       this.prisma.trend.findMany({ where: { lifecycle: { not: TrendLifecycle.EXPIRED } }, orderBy: { currentScore: 'desc' }, take: 10, include: { events: { include: { event: true } }, publications: { orderBy: { createdAt: 'desc' }, take: 1 } } }),
       this.prisma.source.findMany({ orderBy: { name: 'asc' } }),
       this.prisma.trend.groupBy({ by: ['category'], where: { lifecycle: { not: TrendLifecycle.EXPIRED } }, _count: { _all: true } }),

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 const links = [
-  ['/dashboard', 'Overview'], ['/trends', 'Trends'], ['/sources', 'Sources'], ['/watchlists', 'Watchlists'], ['/publications', 'Telegram Queue'], ['/settings', 'Settings'],
+  ['/dashboard', 'Overview'], ['/activity', 'Live Pipeline'], ['/trends', 'Trends'], ['/sources', 'Sources'], ['/watchlists', 'Watchlists'], ['/publications', 'Telegram Queue'], ['/settings', 'Settings'],
 ];
 
 export function Sidebar() {

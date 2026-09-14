@@ -1,6 +1,7 @@
 node_modules/
 .env
-.env.*
+.env.local
+.env.*.local
 !.env.example
 dist/
 .next/
@@ -9,16 +10,3 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 backend/prisma/*.db*
-
-# Local credentials and private keys
-*.pem
-*.key
-*.p12
-*.pfx
-credentials.json
-secrets.json
-
-# Editor and OS metadata
-.idea/
-.vscode/
-Thumbs.db

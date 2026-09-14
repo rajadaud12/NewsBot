@@ -18,19 +18,23 @@ export interface ScoreWeights {
   sourceStrength: number;
 }
 
+export type ScoreAvailability = Partial<Record<keyof ScoreComponents, boolean>>;
+
 export interface Thresholds { monitoring: number; rising: number; hot: number; breakout: number }
 
 export const clamp = (value: number, min = 0, max = 100): number => Math.min(max, Math.max(min, Number.isFinite(value) ? value : 0));
 
-export function computeTrendScore(components: ScoreComponents, weights: ScoreWeights): number {
-  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + Math.max(0, weight), 0) || 1;
-  const weighted = components.velocity * weights.velocity
-    + components.acceleration * weights.acceleration
-    + components.engagement * weights.engagement
-    + components.crossPlatform * weights.crossPlatform
-    + components.novelty * weights.novelty
-    + components.sourceStrength * weights.sourceStrength;
+export function computeTrendScore(components: ScoreComponents, weights: ScoreWeights, availability: ScoreAvailability = {}): number {
+  const enabled = (key: keyof ScoreComponents): boolean => availability[key] !== false;
+  const keys = Object.keys(components) as Array<keyof ScoreComponents>;
+  const totalWeight = keys.reduce((sum, key) => sum + (enabled(key) ? Math.max(0, weights[key]) : 0), 0) || 1;
+  const weighted = keys.reduce((sum, key) => sum + (enabled(key) ? components[key] * weights[key] : 0), 0);
   return Math.round(clamp(weighted / totalWeight) * 100) / 100;
+}
+
+export function applyEvidenceConfidence(score: number, evidenceCount: number): number {
+  const confidence = 0.75 + Math.min(1, Math.max(0, evidenceCount - 1) / 2) * 0.25;
+  return Math.round(clamp(score * confidence) * 100) / 100;
 }
 
 export function lifecycleFor(score: number, previous: TrendLifecycle, hoursSinceLastSeen: number, thresholds: Thresholds, expiryHours: number): TrendLifecycle {
@@ -57,6 +61,7 @@ export interface MetricPoint {
 export interface RateMetrics {
   viewsPerMin: number; likesPerMin: number; commentsPerMin: number; repostsPerMin: number;
   mentionsPerMin: number; growthRate: number; acceleration: number; engagementRate: number;
+  interactionVolume: number; hasEngagementData: boolean;
 }
 
 export function calculateMentionMomentum(observedAt: Date[], windowMinutes: number, now = new Date()): { mentionsPerMin: number; acceleration: number; growthRate: number } {
@@ -78,9 +83,12 @@ export function calculateRateMetrics(series: MetricPoint[][], mentionCount: numb
   let comparable = 0;
   let latestViews = 0;
   let latestEngagements = 0;
+  let hasEngagementData = false;
   for (const points of series) {
     if (!points.length) continue;
     const latest = points[points.length - 1];
+    hasEngagementData ||= ['views', 'likes', 'comments', 'reposts', 'redditScore', 'redditComments']
+      .some((key) => latest[key as keyof MetricPoint] !== null && latest[key as keyof MetricPoint] !== undefined);
     latestViews += value(latest, 'views');
     latestEngagements += value(latest, 'likes') + value(latest, 'comments') + value(latest, 'reposts') + value(latest, 'redditScore') + value(latest, 'redditComments');
     if (points.length < 2) continue;
@@ -113,5 +121,7 @@ export function calculateRateMetrics(series: MetricPoint[][], mentionCount: numb
     growthRate: comparable ? totals.growthRate / comparable : 0,
     acceleration: comparable ? totals.acceleration / comparable : 0,
     engagementRate: latestViews > 0 ? latestEngagements / latestViews : 0,
+    interactionVolume: latestEngagements,
+    hasEngagementData,
   };
 }

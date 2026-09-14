@@ -12,13 +12,28 @@ export class GoogleNewsSource implements TrendSource {
   readonly name = 'google-news';
   readonly type = 'GOOGLE_NEWS';
   private readonly parser = new XMLParser({ ignoreAttributes: false });
+  private watchlistCursor = 0;
 
   constructor(private readonly config: ConfigService, private readonly prisma: PrismaService) {}
   isEnabled(): boolean { return this.config.get<string[]>('enabledSources', []).includes(this.name); }
 
   async collect(): Promise<RawEventInput[]> {
-    const watchlistItems = await this.prisma.watchlistItem.findMany({ where: { enabled: true, watchlist: { enabled: true } }, select: { value: true }, take: 50 });
-    const queries = [...new Set([...this.config.get<string[]>('queries.googleNews', []), ...watchlistItems.map((item) => item.value)])];
+    const configured = this.config.get<string[]>('queries.googleNews', []);
+    const maxQueries = Math.min(50, Math.max(configured.length, Number(process.env.GOOGLE_NEWS_MAX_QUERIES_PER_RUN) || 36));
+    const watchlists = await this.prisma.watchlist.findMany({
+      where: { enabled: true },
+      orderBy: { name: 'asc' },
+      select: { items: { where: { enabled: true }, orderBy: { value: 'asc' }, select: { value: true } } },
+    });
+    const interleaved: string[] = [];
+    const longest = Math.max(0, ...watchlists.map((list) => list.items.length));
+    for (let itemIndex = 0; itemIndex < longest; itemIndex += 1) {
+      for (const list of watchlists) if (list.items[itemIndex]) interleaved.push(list.items[itemIndex].value);
+    }
+    const availableSlots = Math.max(0, maxQueries - configured.length);
+    const rotating = Array.from({ length: Math.min(availableSlots, interleaved.length) }, (_, index) => interleaved[(this.watchlistCursor + index) % interleaved.length]);
+    if (interleaved.length) this.watchlistCursor = (this.watchlistCursor + rotating.length) % interleaved.length;
+    const queries = [...new Set([...configured, ...rotating])].slice(0, maxQueries);
     const lookbackHours = this.config.get<number>('collection.googleNewsLookbackHours', 48);
     const cutoff = Date.now() - lookbackHours * 3_600_000;
     const settled = await Promise.allSettled(queries.map(async (query) => {
